@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Character Tetris</title>
+    <style>
+        :root {
+            --primary: #6c5ce7;
+            --bg: #0f0c29;
+            --glass: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(to bottom, #24243e, #302b63, #0f0c29);
+            color: white;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #menu {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 { margin-bottom: 20px; text-shadow: 0 0 10px var(--primary); }
+
+        /* Тонкі кнопки вибору персонажа */
+        .character-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            max-width: 90%;
+        }
+
+        .char-btn {
+            background: var(--glass);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 20px;
+            color: white;
+            cursor: pointer;
+            transition: 0.3s;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .char-btn:hover, .char-btn.active {
+            background: var(--primary);
+            box-shadow: 0 0 15px var(--primary);
+        }
+
+        #game-container {
+            position: relative;
+            margin-top: 10px;
+            border: 4px solid var(--glass);
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            display: block;
+            background: rgba(0,0,0,0.3);
+        }
+
+        .stats {
+            margin-top: 10px;
+            text-align: center;
+            background: var(--glass);
+            padding: 10px 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(5px);
+        }
+
+        #high-score { color: #fdcb6e; font-weight: bold; }
+
+        .controls-hint {
+            font-size: 12px;
+            margin-top: 5px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1>Обери Гравця</h1>
+        <div class="character-list">
+            <button class="char-btn" onclick="startGame('Tito.png')">Tito</button>
+            <button class="char-btn" onclick="startGame('Smartik.png')">Smartik</button>
+            <button class="char-btn" onclick="startGame('Junior.png')">Junior</button>
+            <button class="char-btn" onclick="startGame('Fil.png')">Fil</button>
+            <button class="char-btn" onclick="startGame('Milka.png')">Milka</button>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div>Рахунок: <span id="score">0</span></div>
+        <div>Рекорд: <span id="high-score">0</span></div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="tetris"></canvas>
+    </div>
+
+    <div class="controls-hint">PC: Стрілки | Mob: Свайпи</div>
+
+    <script>
+        const canvas = document.getElementById('tetris');
+        const context = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const highScoreElement = document.getElementById('high-score');
+        
+        // Налаштування розмірів під екран
+        const ROWS = 20;
+        const COLS = 10;
+        const SQ = Math.min(window.innerHeight * 0.7 / ROWS, window.innerWidth * 0.9 / COLS);
+        canvas.width = COLS * SQ;
+        canvas.height = ROWS * SQ;
+
+        let charImg = new Image();
+        let score = 0;
+        let highScore = localStorage.getItem('tetrisHighScore') || 0;
+        highScoreElement.innerText = highScore;
+
+        // Фігури Тетріса
+        const PIECES = [
+            [[1, 1, 1, 1]], // I
+            [[1, 1], [1, 1]], // O
+            [[0, 1, 0], [1, 1, 1]], // T
+            [[1, 0, 0], [1, 1, 1]], // L
+            [[0, 0, 1], [1, 1, 1]], // J
+            [[0, 1, 1], [1, 1, 0]], // S
+            [[1, 1, 0], [0, 1, 1]]  // Z
+        ];
+
+        let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+
+        function drawSquare(x, y, filled) {
+            if (filled) {
+                context.drawImage(charImg, x * SQ, y * SQ, SQ, SQ);
+                context.strokeStyle = "rgba(0,0,0,0.1)";
+                context.strokeRect(x * SQ, y * SQ, SQ, SQ);
+            } else {
+                context.clearRect(x * SQ, y * SQ, SQ, SQ);
+                context.strokeStyle = "rgba(255,255,255,0.05)";
+                context.strokeRect(x * SQ, y * SQ, SQ, SQ);
+            }
+        }
+
+        function drawBoard() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    drawSquare(c, r, board[r][c]);
+                }
+            }
+        }
+
+        class Piece {
+            constructor(matrix) {
+                this.matrix = matrix;
+                this.x = Math.floor(COLS / 2) - Math.floor(matrix[0].length / 2);
+                this.y = -1;
+            }
+
+            draw() {
+                this.matrix.forEach((row, r) => {
+                    row.forEach((value, c) => {
+                        if (value) drawSquare(this.x + c, this.y + r, true);
+                    });
+                });
+            }
+
+            collision(dx, dy, newMatrix = this.matrix) {
+                for (let r = 0; r < newMatrix.length; r++) {
+                    for (let c = 0; c < newMatrix[r].length; c++) {
+                        if (!newMatrix[r][c]) continue;
+                        let newX = this.x + c + dx;
+                        let newY = this.y + r + dy;
+                        if (newX < 0 || newX >= COLS || newY >= ROWS) return true;
+                        if (newY >= 0 && board[newY][newX]) return true;
+                    }
+                }
+                return false;
+            }
+
+            rotate() {
+                let newMatrix = this.matrix[0].map((_, i) => this.matrix.map(row => row[i]).reverse());
+                if (!this.collision(0, 0, newMatrix)) this.matrix = newMatrix;
+            }
+
+            lock() {
+                this.matrix.forEach((row, r) => {
+                    row.forEach((value, c) => {
+                        if (value && this.y + r >= 0) board[this.y + r][this.x + c] = 1;
+                    });
+                });
+                clearLines();
+                if (this.y <= 0) {
+                    alert("Гра закінчена! Твій рахунок: " + score);
+                    resetGame();
+                }
+            }
+        }
+
+        function clearLines() {
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (board[r].every(val => val === 1)) {
+                    board.splice(r, 1);
+                    board.unshift(Array(COLS).fill(0));
+                    score += 100;
+                    if (score > highScore) {
+                        highScore = score;
+                        localStorage.setItem('tetrisHighScore', highScore);
+                        highScoreElement.innerText = highScore;
+                    }
+                    scoreElement.innerText = score;
+                    r++;
+                }
+            }
+        }
+
+        let p = null;
+        let dropCounter = 0;
+        let lastTime = 0;
+
+        function update(time = 0) {
+            const deltaTime = time - lastTime;
+            lastTime = time;
+            dropCounter += deltaTime;
+
+            if (dropCounter > 1000) {
+                if (!p.collision(0, 1)) {
+                    p.y++;
+                } else {
+                    p.lock();
+                    p = new Piece(PIECES[Math.floor(Math.random() * PIECES.length)]);
+                }
+                dropCounter = 0;
+            }
+
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            drawBoard();
+            p.draw();
+            requestAnimationFrame(update);
+        }
+
+        function startGame(imgSrc) {
+            charImg.src = imgSrc;
+            charImg.onload = () => {
+                document.getElementById('menu').style.display = 'none';
+                resetGame();
+                update();
+            };
+        }
+
+        function resetGame() {
+            board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+            score = 0;
+            scoreElement.innerText = score;
+            p = new Piece(PIECES[Math.floor(Math.random() * PIECES.length)]);
+        }
+
+        // Управління ПК
+        document.addEventListener('keydown', e => {
+            if (e.keyCode === 37 && !p.collision(-1, 0)) p.x--;
+            if (e.keyCode === 39 && !p.collision(1, 0)) p.x++;
+            if (e.keyCode === 40 && !p.collision(0, 1)) p.y++;
+            if (e.keyCode === 38) p.rotate();
+        });
+
+        // Управління Mobile (свайпи)
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', e => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        });
+
+        document.addEventListener('touchend', e => {
+            let dx = e.changedTouches[0].clientX - touchStartX;
+            let dy = e.changedTouches[0].clientY - touchStartY;
+
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 30 && !p.collision(1, 0)) p.x++;
+                else if (dx < -30 && !p.collision(-1, 0)) p.x--;
+            } else {
+                if (dy > 30 && !p.collision(0, 1)) p.y++;
+                else if (dy < -30) p.rotate();
+            }
+        });
+
+    </script>
+</body>
+</html>
